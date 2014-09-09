@@ -1,0 +1,26 @@
+[
+{
+    "id":"passthrough",
+    "description":"Basic sanity test",
+    "node-count":4
+},
+{
+    "id":"FoRb",
+    "description":"Failover",
+    "replica-count":2,
+    "node-count":4,
+    "failover-count":2 
+},
+{
+    "id":"AddRb",
+    "description":"Add and rebalance the cluster",
+    "node-count":2,
+    "add-count":2
+},
+{
+    "id":"RemoveRb",
+    "description":"Remove and rebalance the cluster",
+    "node-count":4,
+    "remove-count":2
+}
+]

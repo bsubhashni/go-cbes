@@ -1,0 +1,7 @@
+pkg/*
+bin/*
+src/*
+*.bak
+*.swp
+*.swo
+

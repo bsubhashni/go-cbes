@@ -1,0 +1,10 @@
+[
+    { 
+    "id":"update",
+    "description":"Updates documents"
+    },
+    {
+    "id":"delete",
+    "description":"Deletes documents"
+    }
+]
