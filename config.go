@@ -12,7 +12,7 @@ import (
 const (
 	CouchbaseBucketSeed = "CBucket"
 	MemcachedBucketSeed = "MemdBucket"
-	IndexSeed           = "Index"
+	IndexSeed           = "index"
 	KeySeed             = "SimpleKey"
 )
 
@@ -24,13 +24,13 @@ type Replication struct {
 
 type Config struct {
 	Replications []Replication   `json:"replication"`
-	CBnodes      []CouchbaseNode `json:"cb-nodes"`
-	ESnodes      []ESNode        `json:"es-nodes"`
+	CBNodes      []CouchbaseNode `json:"cb-nodes"`
+	ESNodes      []ESNode        `json:"es-nodes"`
 	SituationId  string          `json:"cluster-situation"`
 	ActionId     string          `json:"data-manipulation"`
 	situation    []Situation
 	action       *Action
-    executors    []Executor
+	executors    []Executor
 }
 
 type Action struct {
@@ -57,8 +57,6 @@ func readSituationOptions(situationsStandard string, situations *[]Situation) (e
 	if err := json.Unmarshal(bytes, situations); err != nil {
 		fmt.Printf("\nError unmarshaling situation options %v", err)
 		return err
-	} else {
-		fmt.Printf("\n%v", *situations)
 	}
 	return nil
 }
@@ -73,8 +71,6 @@ func readActionOptions(dmStandard string, actions *[]Action) (err error) {
 	if err := json.Unmarshal(bytes, actions); err != nil {
 		fmt.Printf("\nError unmarshaling data manipulation options %v", err)
 		return err
-	} else {
-		fmt.Printf("\n%v", *actions)
 	}
 	return nil
 }
@@ -82,22 +78,20 @@ func readActionOptions(dmStandard string, actions *[]Action) (err error) {
 func mapSituation(config *Config, situations *[]Situation) (err error) {
 	for _, situation := range *situations {
 		if strings.EqualFold(config.SituationId, situation.Id) {
-			config.situation = append(config.situation,situation)
-			fmt.Printf("\n \n Copying situation %v", config)
+			config.situation = append(config.situation, situation)
 		}
 	}
-    if (len(config.situation) == 0) {
-	    return errors.New("Cannot map data-manipulation action with the standards")
-    } else {
-        return nil
-    }
+	if len(config.situation) == 0 {
+		return errors.New("Cannot map data-manipulation action with the standards")
+	} else {
+		return nil
+	}
 }
 
 func mapAction(config *Config, actions *[]Action) (err error) {
 	for _, action := range *actions {
 		if strings.EqualFold(config.ActionId, action.Id) {
 			config.action = &action
-			fmt.Printf("\n \n Copying action %v", config)
 			return nil
 		}
 	}
@@ -113,8 +107,6 @@ func LoadConfig(fileName string, dmStandard string, situationsStandard string) (
 	//Read config
 	if err := json.Unmarshal(bytes, &config); err != nil {
 		log.Fatalf("Error unmarshaling config %v", err)
-	} else {
-		fmt.Printf("%v", config)
 	}
 
 	//Read Standards

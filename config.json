@@ -1,18 +1,37 @@
 {
     "replication": [
-        {"bucket-type":"memcached","item-count":1000,"item-size":10000},
-        {"bucket-type":"couchbase","item-count":1000,"item-size":10000}
+    {
+        "bucket-type": "memcached",
+        "item-size": 10000000
+    }
     ],
-    "cb-nodes": [
-        {"ip":"10.3.121.16","port":"8091","username":"root","password":"password"},
-        {"ip":"10.3.121.15","port":"8091","username":"root","password":"password"},
-        {"ip":"10.3.121.15","port":"8091","username":"root","password":"password"},
-        {"ip":"10.3.121.15","port":"8091","username":"root","password":"password"}
+        "cb-nodes": [
+        {
+            "ip": "172.23.107.58",
+            "port": "8091",
+            "username": "Administrator",
+            "password": "password",
+            "ssh-username": "root",
+            "ssh-password": "couchbase"
+        },
+    {
+            "ip": "172.23.107.59",
+            "port": "8091",
+            "username": "Administrator",
+            "password": "password",
+            "ssh-username": "root",
+            "ssh-password": "couchbase"
+        }
     ],
-    "es-nodes": [
-        {"ip":"127.0.0.1","port":"8091","username":"root","password":"password"}
+        "es-nodes": [
+        {
+            "ip": "172.23.106.220",
+            "port": "9200",
+            "connector-port": "9091",
+            "username": "Administrator",
+            "password": "password"
+        }
     ],
-    "cluster-situation": "AddRb",
-    "data-manipulation": "update"
+        "cluster-situation": "addrb",
+        "data-manipulation": "update"
 }
-

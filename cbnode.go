@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"code.google.com/p/go.crypto/ssh"
 	"encoding/json"
 	"errors"
@@ -9,9 +10,11 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 const (
+	settingsUri          = "/settings/web"
 	startRebalanceUri    = "/controller/rebalance"
 	stopRebalanceUri     = "/controller/StopRebalance"
 	addNodeUri           = "/controller/addNode"
@@ -28,20 +31,15 @@ type CouchbaseNode struct {
 	Ip              string `json:"ip"`
 	Port            string `json:"port"`
 	BaseURL         string
-	BucketDetails   Bucket
 	AdminUserName   string `json:"username"`
 	AdminPassword   string `json:"password"`
-	CouchbaseClient couchbase.Client
+	SSHUserName     string `json:"ssh-username"`
+	SSHPassword     string `json:"ssh-password"`
 	HttpClient      *http.Client
 	Bucket          *couchbase.Bucket
 	WorkloadCommand chan int
 	KnownNodes      map[string]*CouchbaseNode
 	EjectNodes      map[string]*CouchbaseNode
-}
-
-type Bucket struct {
-	Name      string
-	Itemcount string
 }
 
 type RebalanceStatus struct {
@@ -50,12 +48,11 @@ type RebalanceStatus struct {
 
 func (node *CouchbaseNode) StartService() (err error) {
 	config := &ssh.ClientConfig{
-		User: node.AdminUserName,
+		User: node.SSHUserName,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(node.AdminPassword),
+			ssh.Password(node.SSHPassword),
 		},
 	}
-
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", node.Ip), config)
 	if err != nil {
 		return err
@@ -76,25 +73,22 @@ func (node *CouchbaseNode) StartService() (err error) {
 	return nil
 }
 
-func (node *CouchbaseNode) Start() (err error) {
+func (node *CouchbaseNode) Init() (err error) {
 	userinfo := url.UserPassword(node.AdminUserName, node.AdminPassword)
-
-	url := &url.URL{
+	u := &url.URL{
 		Scheme: "http",
 		User:   userinfo,
 		Host:   node.Ip + ":" + node.Port,
 	}
-	fmt.Printf("\n url str %s \n", url.String())
-	c, err := couchbase.Connect(url.String())
-	if err != nil {
-		return err
-	}
-	node.CouchbaseClient = c
+
 	node.HttpClient = &http.Client{}
-	node.BaseURL = url.String()
+	node.BaseURL = u.String()
 	node.KnownNodes = make(map[string]*CouchbaseNode)
 	node.EjectNodes = make(map[string]*CouchbaseNode)
 	node.KnownNodes[node.Ip] = node
+    if err = node.InitializeSetting(); err != nil {
+        return err
+    }
 	return nil
 }
 
@@ -107,6 +101,7 @@ func (node *CouchbaseNode) AddNode(n *CouchbaseNode) (err error) {
 	api := fmt.Sprintf("%s%s", node.BaseURL, addNodeUri)
 	delete(node.KnownNodes, n.Ip)
 
+	node.HttpClient = &http.Client{}
 	resp, err := node.HttpClient.PostForm(api, values)
 	if err != nil {
 		fmt.Printf("error getting response %v", err)
@@ -117,7 +112,7 @@ func (node *CouchbaseNode) AddNode(n *CouchbaseNode) (err error) {
 
 	if resp.StatusCode != http.StatusOK {
 		if body, err := ioutil.ReadAll(resp.Body); err == nil {
-			fmt.Printf("\n body of the response with error %s", body)
+			fmt.Printf("\n body of the response with error %s %s", body, n.Ip)
 		}
 		return errors.New(fmt.Sprintf("Received a bad status %v", resp.Status))
 	}
@@ -147,6 +142,7 @@ func (node *CouchbaseNode) EjectNode(n *CouchbaseNode) (err error) {
 		return errors.New(fmt.Sprintf("Received a bad status %v", resp.Status))
 	}
 	node.EjectNodes[n.Ip] = n
+    fmt.Printf("\n Known nodes %v", node.KnownNodes)
 	delete(node.KnownNodes, n.Ip)
 
 	return nil
@@ -154,11 +150,14 @@ func (node *CouchbaseNode) EjectNode(n *CouchbaseNode) (err error) {
 
 func (node *CouchbaseNode) FailoverNode(n *CouchbaseNode) (err error) {
 	values := url.Values{}
-	values.Set("otpNode", fmt.Sprintf("ns_2@%s", n.Ip))
+	values.Set("otpNode", fmt.Sprintf("ns_1@%s", n.Ip))
 	api := fmt.Sprintf("%s%s", node.BaseURL, failoverNodeUri)
+	fmt.Printf("failover api %s %s", api,n.Ip)
 
-	fmt.Printf("failover api %s", api)
-	resp, err := node.HttpClient.PostForm(api, values)
+    req, err := http.NewRequest("POST", api, strings.NewReader(values.Encode()))
+    req.Header.Set("Content-Type","application/x-www-form-urlencoded")
+	resp, err := node.HttpClient.Do(req)
+
 	if err != nil {
 		fmt.Printf("Error getting a response")
 		return err
@@ -246,6 +245,41 @@ func (node *CouchbaseNode) RebalanceProgress() (status string, err error) {
 	return status, nil
 }
 
+func (node *CouchbaseNode) InitializeSetting() (err error) {
+	values := url.Values{}
+
+	values.Set("username", node.AdminUserName)
+	values.Set("password", node.AdminPassword)
+	values.Set("port", node.Port)
+
+	api := fmt.Sprintf("%s%s", node.BaseURL, settingsUri)
+	node.HttpClient = &http.Client{}
+
+	req, err := http.NewRequest("POST", api, strings.NewReader(values.Encode()))
+	if err != nil {
+		fmt.Printf("Error creating request %v", req)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := node.HttpClient.Do(req)
+
+	if err != nil {
+		fmt.Printf("error getting initialize bucket response %v", err)
+		return err
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		if body, err := ioutil.ReadAll(resp.Body); err == nil {
+			fmt.Printf("\n error reading create bucket response %s", body)
+		}
+		return errors.New(fmt.Sprintf("Received a bad status %v", resp.Status))
+	}
+
+	return nil
+
+}
+
 func (node *CouchbaseNode) CreateBucket(bucketname string) (err error) {
 	values := url.Values{}
 
@@ -253,9 +287,17 @@ func (node *CouchbaseNode) CreateBucket(bucketname string) (err error) {
 	values.Set("ramQuotaMB", "200")
 	values.Set("authType", "none")
 	values.Set("replicaNumber", "1")
+	values.Set("proxyPort", "11220")
 
 	api := fmt.Sprintf("%s%s", node.BaseURL, createBucketUri)
-	resp, err := node.HttpClient.PostForm(api, values)
+	node.HttpClient = &http.Client{}
+
+	req, err := http.NewRequest("POST", api, strings.NewReader(values.Encode()))
+	if err != nil {
+		fmt.Printf("Error creating request %v", req)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := node.HttpClient.Do(req)
 
 	if err != nil {
 		fmt.Printf("error getting create bucket response %v", err)
@@ -264,7 +306,7 @@ func (node *CouchbaseNode) CreateBucket(bucketname string) (err error) {
 
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		if body, err := ioutil.ReadAll(resp.Body); err == nil {
 			fmt.Printf("\n error reading create bucket response %s", body)
 		}
@@ -274,15 +316,22 @@ func (node *CouchbaseNode) CreateBucket(bucketname string) (err error) {
 	return nil
 }
 
-func (node *CouchbaseNode) ConnectToBucket() (err error) {
-	c := node.CouchbaseClient
-	p, err := c.GetPool(node.Bucket.Name)
+func (node *CouchbaseNode) ConnectToBucket(bucketname string) (err error) {
+	u := &url.URL{
+		Scheme: "http",
+		Host:   node.Ip + ":" + node.Port,
+	}
+
+	c, err := couchbase.Connect(u.String())
+	if err != nil {
+		return err
+	}
+	p, err := c.GetPool("default")
 	if err != nil {
 		return err
 	}
 
-	b, err := p.GetBucket(node.BucketDetails.Name)
-	node.Bucket = b
+	node.Bucket, err = p.GetBucket(bucketname)
 	return err
 }
 
@@ -294,11 +343,14 @@ func (node *CouchbaseNode) DoOp(opName string, key string, doc interface{}) (err
 	case opName == "SET":
 		err = node.Bucket.Set(key, 0, doc)
 	}
+	if err != nil {
+		fmt.Printf("Error while doing an operation %v", err)
+	}
 	return err
 }
 
 func (node *CouchbaseNode) DeleteBucket(bucketname string) (err error) {
-	api := fmt.Sprintf("%s%s", node.BaseURL, createBucketUri, bucketname)
+	api := fmt.Sprintf("%s/%s/%s", node.BaseURL, createBucketUri, bucketname)
 
 	req, err := http.NewRequest("DELETE", api, nil)
 	if err != nil {
@@ -309,15 +361,13 @@ func (node *CouchbaseNode) DeleteBucket(bucketname string) (err error) {
 	resp, err := node.HttpClient.Do(req)
 
 	if err != nil {
-		fmt.Printf("error getting create bucket response %v", err)
+		fmt.Printf("\n error getting delete bucket response %v", err)
 		return err
 	}
-
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		if body, err := ioutil.ReadAll(resp.Body); err == nil {
-			fmt.Printf("\n error reading create bucket response %s", body)
+			fmt.Printf("\n error reading delete bucket response %s", body)
 		}
 		return errors.New(fmt.Sprintf("Received a bad status %v", resp.Status))
 	}
@@ -325,11 +375,76 @@ func (node *CouchbaseNode) DeleteBucket(bucketname string) (err error) {
 	return nil
 }
 
+func (node *CouchbaseNode) CreateRemoteClusterReference(es *ESNode) (err error) {
+	values := url.Values{}
+	values.Set("name", "remote")
+	values.Set("hostname", fmt.Sprintf("%s:%s", es.Ip, es.ConnectorPort))
+	values.Set("username", es.AdminUserName)
+	values.Set("password", es.AdminPassword)
+
+	api := fmt.Sprintf("%s%s", node.BaseURL, remoteClusterUri)
+	fmt.Printf("\n Create Remote Cluster %s values %s \n", api, values.Encode())
+
+	req, err := http.NewRequest("POST", api, strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := node.HttpClient.Do(req)
+	if err != nil {
+		fmt.Printf("\n Unable to create remote cluster reference %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		fmt.Printf("Got Bad HTTP response %v on adding remote cluster reference ", resp.Status)
+		if body, err := ioutil.ReadAll(resp.Body); err == nil {
+			buf := bytes.NewBuffer(body)
+			fmt.Printf("\n response %v", buf.String())
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (node *CouchbaseNode) CreateReplication(bucket string, index string) (err error) {
+	values := url.Values{}
+	values.Set("fromBucket", bucket)
+	values.Set("toBucket", index)
+	values.Set("toCluster", "remote")
+	values.Set("replicationType", "continuous")
+	values.Set("type", "capi")
+
+	api := fmt.Sprintf("%s%s", node.BaseURL, replicationUri)
+	fmt.Printf("\n Create Remote Cluster %s values %s \n", api, values.Encode())
+
+	req, err := http.NewRequest("POST", api, strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := node.HttpClient.Do(req)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		fmt.Printf("Got Bad HTTP response %v on adding remote cluster reference ", resp.Status)
+		if body, err := ioutil.ReadAll(resp.Body); err == nil {
+			buf := bytes.NewBuffer(body)
+			fmt.Printf("\n response %v", buf.String())
+		}
+		return err
+	}
+
+	return nil
+}
+
 func (node *CouchbaseNode) StopService() (err error) {
 	config := &ssh.ClientConfig{
-		User: node.AdminUserName,
+		User: node.SSHUserName,
 		Auth: []ssh.AuthMethod{
-			ssh.Password(node.AdminPassword),
+			ssh.Password(node.SSHPassword),
 		},
 	}
 
