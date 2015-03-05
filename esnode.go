@@ -48,7 +48,7 @@ func (node *ESNode) StartService() (err error) {
 	}
 	defer session.Close()
 
-	command := "elasticsearch-1.3.2/bin/elasticsearch > out.log 2>&1 &"
+	command := "/etc/init.d/elasticsearch > out.log 2>&1 &"
 
 	var b bytes.Buffer
 	session.Stdout = &b
@@ -61,7 +61,6 @@ func (node *ESNode) StartService() (err error) {
 
 func (node *ESNode) Init() {
 	//userinfo := url.UserPassword(node.AdminUserName, node.AdminPassword)
-
 	if node.Ip == "" || node.Port == "" {
 		fmt.Printf("IP and port of the es node are needed")
 		os.Exit(1)
